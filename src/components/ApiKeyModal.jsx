@@ -30,7 +30,7 @@ export function ApiKeyModal({ onValidate, isLoading, error }) {
               type="password"
               value={key}
               onChange={(e) => setKey(e.target.value)}
-              placeholder="sk-..."
+              placeholder="xxxxx-xxxxx-xxxxx-xxxxx"
               className="w-full px-4 py-3 text-lg bg-transparent border-b-2 border-brand-border focus:border-brand-black outline-none transition-colors placeholder:text-brand-textSecondary/50 text-center font-mono"
               autoFocus
             />

@@ -16,6 +16,7 @@ function App() {
   
   const [postText, setPostText] = useState('');
   const [originalPostText, setOriginalPostText] = useState('');
+  const [rewrittenText, setRewrittenText] = useState('');
   const [image, setImage] = useState('');
   
   const [isRewriting, setIsRewriting] = useState(false);
@@ -51,14 +52,33 @@ function App() {
       if (!res.ok) throw new Error('Invalid API Key');
       
       const data = await res.json();
-      setPersonas(data.personas || []);
+      const fetchedPersonas = data.personas || [];
+      setPersonas(fetchedPersonas);
       setApiKey(key);
       localStorage.setItem('BO_API_KEY', key);
       setIsAuthenticated(true);
+
+      // Default selection logic
+      if (fetchedPersonas.length > 0) {
+        const defaultId = "725608553332006912"; // Ella Kenan
+        const found = fetchedPersonas.find(p => p.account_id === defaultId);
+        if (found) {
+          setSelectedPersona(found);
+        } else {
+          setSelectedPersona(fetchedPersonas[0]);
+        }
+      }
     } catch (err) {
-      setAuthError('Authentication failed. Please check your key.');
+      console.error("Auth Error:", err);
+      // differentiate error messages
+      if (err.message === 'Invalid API Key') {
+        setAuthError('Invalid API Key. Please check your credentials.');
+      } else {
+        setAuthError(`Connection error: ${err.message}`);
+      }
+      
       setIsAuthenticated(false);
-      localStorage.removeItem('BO_API_KEY'); // Clear bad key
+      localStorage.removeItem('BO_API_KEY'); 
       setApiKey('');
     } finally {
       setAuthLoading(false);
@@ -88,7 +108,7 @@ function App() {
       const data = await res.json();
       // The Spec says response body for non-streaming is: { success: true, response: "...", ... }
       if (data.response) {
-        setPostText(data.response);
+        setRewrittenText(data.response);
       }
     } catch (err) {
       alert('Failed to rewrite post. Please try again.');
@@ -98,10 +118,17 @@ function App() {
     }
   };
 
-  const handlePost = () => {
-    const text = encodeURIComponent(postText);
+  const handlePost = (textToPost) => {
+    // If textToPost argument is provided, use it. Otherwise use main postText.
+    const finalContent = typeof textToPost === 'string' ? textToPost : postText;
+    const text = encodeURIComponent(finalContent);
     const url = `https://x.com/intent/post?text=${text}`;
     window.open(url, '_blank');
+  };
+
+  const handleApplyRewrite = () => {
+    setPostText(rewrittenText);
+    setRewrittenText(''); // Clear suggestion after applying
   };
 
   const handleRevert = () => {
@@ -173,6 +200,9 @@ function App() {
           <Composer 
             value={postText}
             onChange={setPostText}
+            rewrittenValue={rewrittenText}
+            onApplyRewrite={handleApplyRewrite}
+            setRewrittenText={setRewrittenText}
             originalValue={originalPostText}
             onRevert={handleRevert}
             onRewrite={handleRewrite}
