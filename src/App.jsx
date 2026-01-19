@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { PersonaSidebar } from './components/PersonaSidebar';
 import { Composer } from './components/Composer';
@@ -17,9 +17,13 @@ function App() {
   const [postText, setPostText] = useState('');
   const [originalPostText, setOriginalPostText] = useState('');
   const [rewrittenText, setRewrittenText] = useState('');
+  const [rewriteHistory, setRewriteHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [image, setImage] = useState('');
   
   const [isRewriting, setIsRewriting] = useState(false);
+  const isInitialMount = useRef(true);
+  const hasAutoRewritten = useRef(false);
 
   // Initialize from URL and LocalStorage
   useEffect(() => {
@@ -37,6 +41,32 @@ function App() {
       validateKey(apiKey);
     }
   }, []);
+
+  // Auto-rewrite on load if there's text and a persona is selected
+  useEffect(() => {
+    if (selectedPersona && postText.trim() && !hasAutoRewritten.current && isAuthenticated) {
+      hasAutoRewritten.current = true;
+      handleRewrite(selectedPersona, postText);
+    }
+  }, [selectedPersona, isAuthenticated]);
+
+  // Update URL params when postText changes (but not on initial mount)
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
+    const params = new URLSearchParams();
+    if (postText) {
+      params.set('post', postText);
+    }
+    if (image) {
+      params.set('image', image);
+    }
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+  }, [postText, image]);
 
   const validateKey = async (key) => {
     setAuthLoading(true);
@@ -85,19 +115,23 @@ function App() {
     }
   };
 
-  const handleRewrite = async () => {
-    if (!selectedPersona || !postText) return;
+  const handleRewrite = async (persona, text) => {
+    // Use provided params or fall back to current state
+    const personaToUse = persona || selectedPersona;
+    const textToUse = text || postText;
+    
+    if (!personaToUse || !textToUse.trim()) return;
     
     setIsRewriting(true);
     try {
-      const res = await fetch(`${API_BASE}/personas/${selectedPersona.account_id}/chat`, {
+      const res = await fetch(`${API_BASE}/personas/${personaToUse.account_id}/chat`, {
         method: 'POST',
         headers: {
           'X-API-Key': apiKey,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          message: `Rewrite the following social media post in your specific voice and style. strictly output only the rewritten text nothing else:\n\n${postText}`,
+          message: `Rewrite the following social media post in your specific voice and style. strictly output only the rewritten text nothing else:\n\n${textToUse}`,
           stream: false,
           include_debug: false
         })
@@ -109,12 +143,49 @@ function App() {
       // The Spec says response body for non-streaming is: { success: true, response: "...", ... }
       if (data.response) {
         setRewrittenText(data.response);
+        
+        // Add to history
+        const newHistoryEntry = {
+          text: data.response,
+          personaId: personaToUse.account_id,
+          personaName: personaToUse.display_name,
+          timestamp: Date.now()
+        };
+        
+        // If we're not at the end of history, remove everything after current position
+        const newHistory = historyIndex >= 0 
+          ? [...rewriteHistory.slice(0, historyIndex + 1), newHistoryEntry]
+          : [...rewriteHistory, newHistoryEntry];
+        
+        setRewriteHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
       }
     } catch (err) {
       alert('Failed to rewrite post. Please try again.');
       console.error(err);
     } finally {
       setIsRewriting(false);
+    }
+  };
+
+  const handleHistoryNavigate = (direction, index) => {
+    let newIndex;
+    if (direction === 'goto') {
+      newIndex = index;
+    } else {
+      newIndex = direction === 'back' ? historyIndex - 1 : historyIndex + 1;
+    }
+    if (newIndex >= 0 && newIndex < rewriteHistory.length) {
+      setHistoryIndex(newIndex);
+      setRewrittenText(rewriteHistory[newIndex].text);
+    }
+  };
+
+  const handlePersonaSelect = (persona) => {
+    setSelectedPersona(persona);
+    // Automatically trigger rewrite if there's text
+    if (postText.trim()) {
+      handleRewrite(persona, postText);
     }
   };
 
@@ -194,7 +265,7 @@ function App() {
           <PersonaSidebar 
             personas={personas} 
             selectedId={selectedPersona?.account_id}
-            onSelect={setSelectedPersona}
+            onSelect={handlePersonaSelect}
           />
           
           <Composer 
@@ -210,6 +281,11 @@ function App() {
             isRewriting={isRewriting}
             selectedPersona={selectedPersona}
             imagePreview={image}
+            historyIndex={historyIndex}
+            historyLength={rewriteHistory.length}
+            onHistoryNavigate={handleHistoryNavigate}
+            currentHistoryPersona={historyIndex >= 0 ? rewriteHistory[historyIndex]?.personaName : null}
+            rewriteHistory={rewriteHistory}
           />
         </main>
       </div>

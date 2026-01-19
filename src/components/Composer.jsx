@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { Send, Sparkles, Undo2, Image as ImageIcon, ArrowDown, Check, X } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Send, Sparkles, Undo2, Image as ImageIcon, ArrowDown, Check, X, Download, Clock } from 'lucide-react';
 
 export function Composer({ 
   value, 
@@ -13,10 +13,17 @@ export function Composer({
   onPost, 
   isRewriting, 
   selectedPersona,
-  imagePreview 
+  imagePreview,
+  historyIndex,
+  historyLength,
+  onHistoryNavigate,
+  currentHistoryPersona,
+  rewriteHistory
 }) {
   const isDirty = value !== originalValue;
   const suggestionRef = useRef(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const historyRef = useRef(null);
 
   useEffect(() => {
     if (suggestionRef.current) {
@@ -25,14 +32,71 @@ export function Composer({
     }
   }, [rewrittenValue]);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (historyRef.current && !historyRef.current.contains(event.target)) {
+        setShowHistory(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full pb-20">
       {/* REWRITTEN SUGGESTION AREA */}
       {rewrittenValue && (
         <div className="animate-in fade-in slide-in-from-top-4 duration-300 mb-8 z-10 relative">
-           <div className="flex items-center gap-2 mb-3 px-2">
-              <Sparkles className="w-3.5 h-3.5 text-brand-black" />
-              <span className="text-xs font-bold uppercase tracking-wider text-brand-black">Suggested from {selectedPersona?.display_name || 'AI'}</span>
+           <div className="flex items-center justify-between mb-3 px-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-brand-black" />
+                <span className="text-xs font-bold uppercase tracking-wider text-brand-black">
+                  Suggested from {currentHistoryPersona || selectedPersona?.display_name || 'AI'}
+                </span>
+              </div>
+              
+              {historyLength > 1 && rewriteHistory && rewriteHistory.length > 0 && (
+                <div className="relative" ref={historyRef}>
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-textSecondary hover:text-brand-black hover:bg-brand-surface rounded-lg transition-colors"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Previous Versions ({historyLength})</span>
+                  </button>
+                  
+                  {showHistory && (
+                    <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-brand-border rounded-xl shadow-xl overflow-hidden z-20">
+                      <div className="max-h-80 overflow-y-auto">
+                        {rewriteHistory.map((item, index) => (
+                          <button
+                            key={index}
+                            onClick={() => {
+                              onHistoryNavigate('goto', index);
+                              setShowHistory(false);
+                            }}
+                            className={`w-full text-left p-4 border-b border-brand-border/50 hover:bg-brand-surface transition-colors ${
+                              index === historyIndex ? 'bg-brand-surface' : ''
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-brand-black">
+                                {item.personaName}
+                              </span>
+                              {index === historyIndex && (
+                                <Check className="w-3.5 h-3.5 text-brand-success" />
+                              )}
+                            </div>
+                            <p className="text-sm text-brand-text line-clamp-2">
+                              {item.text}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
            </div>
            
            <div className="bg-[#FAFBFB] rounded-xl border border-brand-border shadow-lg shadow-black/5 relative overflow-hidden group hover:shadow-xl hover:border-brand-text/20 transition-all">
@@ -51,8 +115,20 @@ export function Composer({
                     alt="Post attachment" 
                     className="w-full rounded-lg border border-brand-border object-cover max-h-[300px]"
                   />
-                  <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-0.5 rounded text-[10px] backdrop-blur-md font-medium">
-                    Included
+                  <div className="absolute top-2 right-2 flex items-center gap-2">
+                    <div className="bg-black/50 text-white px-2 py-0.5 rounded text-[10px] backdrop-blur-md font-medium">
+                      Included
+                    </div>
+                    <a
+                      href={imagePreview}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="bg-black/50 hover:bg-black/70 text-white p-1.5 rounded backdrop-blur-md transition-colors"
+                      title="Download image"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </a>
                   </div>
                 </div>
               )}
@@ -106,10 +182,10 @@ export function Composer({
             spellCheck="false"
           />
           {isRewriting && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex items-center gap-2 text-brand-black animate-pulse">
-                <Sparkles className="w-5 h-5" />
-                <span className="font-medium text-sm">Rewriting in {selectedPersona?.handle || 'persona'}'s voice...</span>
+            <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm rounded-xl">
+              <div className="flex flex-col items-center gap-3 bg-white border-2 border-brand-black text-brand-black px-6 py-4 rounded-2xl shadow-xl">
+                <Sparkles className="w-6 h-6 animate-spin" />
+                <span className="font-semibold text-base">Rewriting in {selectedPersona?.handle || 'persona'}'s voice...</span>
               </div>
             </div>
           )}
@@ -122,26 +198,27 @@ export function Composer({
               alt="Post attachment" 
               className="w-full rounded-2xl border border-brand-border object-cover max-h-[400px]"
             />
-            <div className="absolute top-3 right-3 bg-black/50 text-white px-2 py-1 rounded text-xs backdrop-blur-md">
-              Preview
+            <div className="absolute top-3 right-3 flex items-center gap-2">
+              <div className="bg-black/50 text-white px-2 py-1 rounded text-xs backdrop-blur-md">
+                Preview
+              </div>
+              <a
+                href={imagePreview}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-black/50 hover:bg-black/70 text-white p-2 rounded backdrop-blur-md transition-colors"
+                title="Download image"
+              >
+                <Download className="w-4 h-4" />
+              </a>
             </div>
           </div>
         )}
       </div>
       
       {/* MAIN ACTIONS */}
-      <div className="border-t border-brand-border pt-6 flex items-center justify-between mb-8">
-        <div className="flex gap-4">
-          <button
-            onClick={onRewrite}
-            disabled={!selectedPersona || isRewriting || !value.trim()}
-            className="flex items-center gap-2 px-4 py-2 rounded-full border border-brand-border text-brand-text font-semibold text-sm hover:border-brand-black hover:bg-brand-surface transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-brand-border disabled:hover:bg-transparent"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Rewrite</span>
-          </button>
-        </div>
-
+      <div className="border-t border-brand-border pt-6 flex items-center justify-end mb-8">
         <button
           onClick={() => onPost()}
           disabled={!value.trim()}
