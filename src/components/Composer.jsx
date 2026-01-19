@@ -44,6 +44,19 @@ export function Composer({
                 spellCheck="false"
               />
 
+              {imagePreview && (
+                <div className="mx-6 mb-6 relative group">
+                  <img 
+                    src={imagePreview} 
+                    alt="Post attachment" 
+                    className="w-full rounded-lg border border-brand-border object-cover max-h-[300px]"
+                  />
+                  <div className="absolute top-2 right-2 bg-black/50 text-white px-2 py-0.5 rounded text-[10px] backdrop-blur-md font-medium">
+                    Included
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-brand-border/50 bg-white/50 backdrop-blur-sm">
                 <button 
                   onClick={() => setRewrittenText('')}
