@@ -54,8 +54,8 @@ function App() {
       if (storedXUser && storedToken) {
         try {
           setXUser(JSON.parse(storedXUser));
-          // Optionally validate the token
-          validateXToken(storedToken);
+          // Token validation will happen automatically when user tries to post
+          // No need to validate immediately on page load
         } catch (e) {
           console.error('Failed to parse stored X user:', e);
           // Clear invalid data
