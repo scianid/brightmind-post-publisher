@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { TwitterApi } = require('twitter-api-v2');
 const crypto = require('crypto');
+const axios = require('axios');
 
 /**
  * GET /api/x/auth/config
@@ -51,7 +52,7 @@ router.post('/auth/token', async (req, res) => {
     }
 
     // Validate environment configuration
-    if (!process.env.X_CLIENT_ID) {
+    if (!process.env.X_CLIENT_ID || !process.env.X_CLIENT_SECRET) {
       return res.status(500).json({ 
         error: 'Server configuration error',
         message: 'X API credentials not configured' 
@@ -61,27 +62,32 @@ router.post('/auth/token', async (req, res) => {
     console.log('Proxying token exchange to Twitter API...');
     
     // Exchange code for token by proxying to Twitter API
-    const tokenResponse = await fetch('https://api.twitter.com/2/oauth2/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        code,
-        grant_type: 'authorization_code',
-        client_id: process.env.X_CLIENT_ID,
-        redirect_uri: redirectUri,
-        code_verifier: codeVerifier,
-      }),
+    // Note: Some Twitter apps require client_secret even with PKCE
+    const params = new URLSearchParams({
+      code,
+      grant_type: 'authorization_code',
+      client_id: process.env.X_CLIENT_ID,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
     });
     
-    if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json();
-      console.error('Twitter token exchange failed:', errorData);
-      throw new Error(errorData.error_description || 'Token exchange failed');
-    }
+    // Create Basic Auth header with client_id:client_secret
+    const authHeader = Buffer.from(
+      `${process.env.X_CLIENT_ID}:${process.env.X_CLIENT_SECRET}`
+    ).toString('base64');
     
-    const { access_token, refresh_token, expires_in } = await tokenResponse.json();
+    const tokenResponse = await axios.post(
+      'https://api.twitter.com/2/oauth2/token',
+      params.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${authHeader}`,
+        },
+      }
+    );
+    
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
     
     console.log('Token exchange successful');
     
