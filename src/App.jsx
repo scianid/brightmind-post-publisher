@@ -4,6 +4,7 @@ import { PersonaSidebar } from './components/PersonaSidebar';
 import { Composer } from './components/Composer';
 
 const API_BASE = 'https://app.brightmind-community.com';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
 function App() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('BO_API_KEY') || '');
@@ -25,6 +26,10 @@ function App() {
   const isInitialMount = useRef(true);
   const hasAutoRewritten = useRef(false);
 
+  // X (Twitter) Authentication State
+  const [xUser, setXUser] = useState(null);
+  const [xAuthLoading, setXAuthLoading] = useState(false);
+
   // Initialize from URL and LocalStorage
   useEffect(() => {
     // URL Params
@@ -36,6 +41,23 @@ function App() {
     setOriginalPostText(initialPost);
     setImage(initialImage);
 
+
+    // Check for X OAuth callback
+    const code = params.get('code');
+    const state = params.get('state');
+    if (code && state) {
+      handleXCallback(code, state);
+    }
+
+    // Restore X user from session storage
+    const storedXUser = sessionStorage.getItem('x_user');
+    if (storedXUser) {
+      try {
+        setXUser(JSON.parse(storedXUser));
+      } catch (e) {
+        console.error('Failed to parse stored X user:', e);
+      }
+    }
     // Auto-validate if key exists
     if (apiKey) {
       validateKey(apiKey);
@@ -197,6 +219,241 @@ function App() {
     window.open(url, '_blank');
   };
 
+  // X (Twitter) Authentication Handlers
+  const handleXLogin = async () => {
+    setXAuthLoading(true);
+    try {
+      // Get OAuth config from backend
+      const response = await fetch(`${BACKEND_URL}/api/x/auth/config`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to get X OAuth config');
+      }
+      
+      const { clientId } = await response.json();
+      
+      // Store client ID for later use (logout)
+      sessionStorage.setItem('x_client_id', clientId);
+      
+      // Generate PKCE challenge on client
+      const codeVerifier = generateCodeVerifier();
+      const codeChallenge = await generateCodeChallenge(codeVerifier);
+      
+      // Generate state for CSRF protection
+      const state = generateRandomString(32);
+      
+      // Store verifier and state for callback
+      sessionStorage.setItem('x_code_verifier', codeVerifier);
+      sessionStorage.setItem('x_state', state);
+      
+      // Build authorization URL with client as redirect URI
+      const redirectUri = window.location.origin;
+      const authUrl = new URL('https://twitter.com/i/oauth2/authorize');
+      authUrl.searchParams.append('response_type', 'code');
+      authUrl.searchParams.append('client_id', clientId);
+      authUrl.searchParams.append('redirect_uri', redirectUri);
+      authUrl.searchParams.append('scope', 'tweet.read tweet.write users.read offline.access');
+      authUrl.searchParams.append('state', state);
+      authUrl.searchParams.append('code_challenge', codeChallenge);
+      authUrl.searchParams.append('code_challenge_method', 'S256');
+      
+      // Redirect to X authorization
+      window.location.href = authUrl.toString();
+    } catch (error) {
+      console.error('X login failed:', error);
+      alert('Failed to start X login. Please try again.');
+      setXAuthLoading(false);
+    }
+  };
+
+  // PKCE Helper Functions
+  function generateCodeVerifier() {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return base64URLEncode(array);
+  }
+
+  async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return base64URLEncode(new Uint8Array(hash));
+  }
+
+  function base64URLEncode(buffer) {
+    const base64 = btoa(String.fromCharCode(...buffer));
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  function generateRandomString(length) {
+    const array = new Uint8Array(length);
+    crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  const handleXCallback = async (code, state) => {
+    const storedState = sessionStorage.getItem('x_state');
+    const codeVerifier = sessionStorage.getItem('x_code_verifier');
+    
+    // Validate state to prevent CSRF
+    if (state !== storedState) {
+      console.error('State mismatch - potential CSRF attack');
+      alert('Authentication failed. Please try again.');
+      return;
+    }
+    
+    setXAuthLoading(true);
+    try {
+      // Get client ID from backend
+      const configResponse = await fetch(`${BACKEND_URL}/api/x/auth/config`);
+      if (!configResponse.ok) {
+        throw new Error('Failed to get OAuth config');
+      }
+      const { clientId } = await configResponse.json();
+      
+      // Exchange code for token directly with X API
+      const redirectUri = window.location.origin;
+      const tokenResponse = await fetch('https://api.twitter.com/2/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          code,
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          code_verifier: codeVerifier,
+        }),
+      });
+      
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.json();
+        throw new Error(errorData.error_description || 'Token exchange failed');
+      }
+      
+      const { access_token, refresh_token, expires_in } = await tokenResponse.json();
+      
+      // Get user info from backend using the access token
+      const userResponse = await fetch(`${BACKEND_URL}/api/x/user`, {
+        headers: {
+          'Authorization': `Bearer ${access_token}`
+        }
+      });
+      
+      if (!userResponse.ok) {
+        throw new Error('Failed to get user info');
+      }
+      
+      const { user } = await userResponse.json();
+      
+      // Store tokens and user info
+      sessionStorage.setItem('x_access_token', access_token);
+      sessionStorage.setItem('x_refresh_token', refresh_token);
+      sessionStorage.setItem('x_user', JSON.stringify(user));
+      sessionStorage.setItem('x_client_id', clientId);
+      setXUser(user);
+      
+      // Clean up and redirect
+      sessionStorage.removeItem('x_state');
+      sessionStorage.removeItem('x_code_verifier');
+      window.history.replaceState({}, '', window.location.pathname);
+      
+    } catch (error) {
+      console.error('X callback handling failed:', error);
+      alert(`Failed to complete X login: ${error.message}`);
+    } finally {
+      setXAuthLoading(false);
+    }
+  };
+
+  const handleXLogout = async () => {
+    const accessToken = sessionStorage.getItem('x_access_token');
+    const clientId = sessionStorage.getItem('x_client_id');
+    
+    try {
+      // Revoke token directly with X API
+      if (accessToken && clientId) {
+        await fetch('https://api.twitter.com/2/oauth2/revoke', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            token: accessToken,
+            client_id: clientId,
+            token_type_hint: 'access_token'
+          })
+        });
+      }
+    } catch (error) {
+      console.error('X logout failed:', error);
+    } finally {
+      // Clear session storage regardless
+      sessionStorage.removeItem('x_access_token');
+      sessionStorage.removeItem('x_refresh_token');
+      sessionStorage.removeItem('x_user');
+      sessionStorage.removeItem('x_client_id');
+      setXUser(null);
+    }
+  };
+
+  const handleDirectPost = async (textToPost, imageUrl) => {
+    const accessToken = sessionStorage.getItem('x_access_token');
+    
+    if (!accessToken) {
+      alert('Please login to X first');
+      return;
+    }
+
+    const finalContent = typeof textToPost === 'string' ? textToPost : postText;
+    
+    try {
+      const endpoint = imageUrl 
+        ? `${BACKEND_URL}/api/x/post/with-media`
+        : `${BACKEND_URL}/api/x/post`;
+
+      const body = imageUrl
+        ? { text: finalContent, imageUrl }
+        : { text: finalContent };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(body)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to post');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        return {
+          success: true,
+          tweetId: result.tweetId,
+          tweetUrl: result.tweetUrl
+        };
+      }
+    } catch (error) {
+      console.error('Failed to post to X:', error);
+      
+      // Handle token expiration
+      if (error.message.includes('expired') || error.message.includes('Unauthorized')) {
+        alert('Your X session has expired. Please log in again.');
+        handleXLogout();
+      } else {
+        alert(`Failed to post: ${error.message}`);
+      }
+      return { success: false };
+    }
+  };
+
   const handleApplyRewrite = () => {
     setPostText(rewrittenText);
     setRewrittenText(''); // Clear suggestion after applying
@@ -286,6 +543,11 @@ function App() {
             onHistoryNavigate={handleHistoryNavigate}
             currentHistoryPersona={historyIndex >= 0 ? rewriteHistory[historyIndex]?.personaName : null}
             rewriteHistory={rewriteHistory}
+            xUser={xUser}
+            xAuthLoading={xAuthLoading}
+            onXLogin={handleXLogin}
+            onXLogout={handleXLogout}
+            onDirectPost={handleDirectPost}
           />
         </main>
       </div>

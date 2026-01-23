@@ -37,10 +37,10 @@ cp .env.example .env
 4. Edit `.env` and add your X API credentials:
 ```env
 X_CLIENT_ID=your_client_id_here
-X_CLIENT_SECRET=your_client_secret_here
-X_REDIRECT_URI=http://localhost:5173/auth/callback
 FRONTEND_URL=http://localhost:5173
 ```
+
+> **Note:** You no longer need `X_CLIENT_SECRET` or `X_REDIRECT_URI` as OAuth callback is handled client-side. The redirect URI configured in your X Developer App should be `http://localhost:5173` (or your frontend URL).
 
 ## Running the Server
 
@@ -83,47 +83,20 @@ The server will start on `http://localhost:3001` (or the PORT specified in .env)
 
 ### Authentication
 
-#### `POST /api/x/auth/init`
-Initialize OAuth flow. Returns authorization URL, state, and code verifier.
+#### `GET /api/x/auth/config`
+Get OAuth configuration for client-side authentication (returns only public client ID).
 
 **Response:**
 ```json
 {
-  "authUrl": "https://twitter.com/i/oauth2/authorize?...",
-  "state": "abc123",
-  "codeVerifier": "xyz789"
+  "clientId": "your_client_id"
 }
 ```
 
-#### `POST /api/x/auth/callback`
-Exchange authorization code for access token.
-
-**Request:**
-```json
-{
-  "code": "oauth_code",
-  "codeVerifier": "xyz789"
-}
-```
-
-**Response:**
-```json
-{
-  "accessToken": "token",
-  "refreshToken": "refresh",
-  "expiresIn": 7200,
-  "user": {
-    "id": "123",
-    "username": "john_doe",
-    "name": "John Doe",
-    "avatar": "https://...",
-    "verified": false
-  }
-}
-```
+> **Note:** OAuth flow is handled client-side using PKCE. The client generates code verifier/challenge and exchanges the authorization code directly with X API.
 
 #### `POST /api/x/auth/refresh`
-Refresh an expired access token.
+Refresh an expired access token (proxies request to X API).
 
 **Request:**
 ```json
@@ -132,12 +105,34 @@ Refresh an expired access token.
 }
 ```
 
-#### `POST /api/x/revoke`
-Revoke access token (logout).
+**Response:**
+```json
+{
+  "accessToken": "new_token",
+  "refreshToken": "new_refresh_token",
+  "expiresIn": 7200
+}
+```
+
+#### `GET /api/x/user`
+Get authenticated user information from access token.
 
 **Headers:**
 ```
 Authorization: Bearer <access_token>
+```
+
+**Response:**
+```json
+{
+  "user": {
+    "id": "123",
+    "username": "john_doe",
+    "name": "John Doe",
+    "avatar": "https://...",
+    "verified": false
+  }
+}
 ```
 
 ### Posting
@@ -170,32 +165,12 @@ Authorization: Bearer <access_token>
 Post a tweet with an image.
 
 **Headers:**
-```
-Authorization: Bearer <access_token>
-```
-
-**Request (with URL):**
-```json
-{
-  "text": "Check this out!",
-  "imageUrl": "https://example.com/image.jpg"
-}
-```
-
-**Request (with base64):**
-```json
-{
-  "text": "Check this out!",
-  "imageBase64": "data:image/jpeg;base64,/9j/4AAQ..."
-}
-```
-
-### User Information
-
-#### `GET /api/x/user`
-Get authenticated user information.
+```/tweets?limit=10`
+Get recent tweets from authenticated user.
 
 **Headers:**
+```
+Authorization: Bearer <access_token>
 ```
 Authorization: Bearer <access_token>
 ```
@@ -284,11 +259,13 @@ backend/
 │   └── xUser.js            # User endpoints
 ├── middleware/
 │   ├── validateToken.js    # Token validation
-│   └── errorHandler.js     # Error handling
-└── utils/
-    ├── twitter.js          # Twitter API helpers
-    └── logger.js           # Logging utility
-```
+│ OAuth callback is handled client-side using PKCE (no client secret exposed)
+- Client secret is NOT required for public OAuth 2.0 apps
+- Use HTTPS in production
+- Implement rate limiting on the backend
+- Validate all user input
+- Keep dependencies up to date
+- Use secure token storage on the frontend (sessionStorage)
 
 ## Deployment
 
@@ -318,8 +295,10 @@ docker run -d \
   --env-file .env \
   --restart unless-stopped \
   brightmind-backend:latest
+``CLIENT_ID=your_production_client_id
 ```
 
+> **Important:** Configure your X Developer App's OAuth 2.0 redirect URI to `https://yourdomain.com` (your frontend URL, not backend).
 #### Push to registry (Docker Hub example):
 ```bash
 docker tag brightmind-backend:latest yourusername/brightmind-backend:latest
@@ -345,7 +324,8 @@ pm2 save
 pm2 startup
 ```
 
-## Troubleshooting
+- Restart the server after changing `.env`
+- Note: `X_CLIENT_SECRET` is no longer required
 
 ### "X API credentials not configured"
 - Ensure `.env` file exists with valid `X_CLIENT_ID` and `X_CLIENT_SECRET`

@@ -1,5 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Send, Sparkles, Undo2, Image as ImageIcon, ArrowDown, Check, X, Download, Clock } from 'lucide-react';
+import { XLoginButton } from './XLoginButton';
+import { XAccountBadge } from './XAccountBadge';
+import { XPostModal } from './XPostModal';
 
 export function Composer({ 
   value, 
@@ -18,12 +21,20 @@ export function Composer({
   historyLength,
   onHistoryNavigate,
   currentHistoryPersona,
-  rewriteHistory
+  rewriteHistory,
+  xUser,
+  xAuthLoading,
+  onXLogin,
+  onXLogout,
+  onDirectPost
 }) {
   const isDirty = value !== originalValue;
   const suggestionRef = useRef(null);
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef(null);
+  const [showXPostModal, setShowXPostModal] = useState(false);
+  const [isPostingToX, setIsPostingToX] = useState(false);
+  const [postingContext, setPostingContext] = useState({ text: '', image: null });
 
   useEffect(() => {
     if (suggestionRef.current) {
@@ -41,6 +52,30 @@ export function Composer({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleDirectPostClick = (text, image) => {
+    setPostingContext({ text, image });
+    setShowXPostModal(true);
+  };
+
+  const handleConfirmDirectPost = async () => {
+    setIsPostingToX(true);
+    try {
+      const result = await onDirectPost(postingContext.text, postingContext.image);
+      if (result?.success) {
+        setShowXPostModal(false);
+        // Show success and optionally open tweet
+        const shouldOpen = window.confirm('Posted successfully! Open tweet in new tab?');
+        if (shouldOpen && result.tweetUrl) {
+          window.open(result.tweetUrl, '_blank');
+        }
+      }
+    } catch (error) {
+      console.error('Direct post error:', error);
+    } finally {
+      setIsPostingToX(false);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full pb-20">
@@ -143,13 +178,23 @@ export function Composer({
                 </button>
                 
                 <div className="flex items-center gap-3">
+                  {xUser ? (
                     <button 
-                    onClick={() => onPost(rewrittenValue)}
-                    className="flex items-center gap-2 px-6 py-2 rounded-full bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-all shadow-md active:translate-y-px"
+                      onClick={() => handleDirectPostClick(rewrittenValue, imagePreview)}
+                      className="flex items-center gap-2 px-6 py-2 rounded-full bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-all shadow-md active:translate-y-px"
                     >
-                    <span>Post to X</span>
-                    <Send className="w-3.5 h-3.5" />
+                      <span>Post to X</span>
+                      <Send className="w-3.5 h-3.5" />
                     </button>
+                  ) : (
+                    <button 
+                      onClick={() => onPost(rewrittenValue)}
+                      className="flex items-center gap-2 px-6 py-2 rounded-full bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-all shadow-md active:translate-y-px"
+                    >
+                      <span>Post to X</span>
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
            </div>
@@ -218,16 +263,73 @@ export function Composer({
       </div>
       
       {/* MAIN ACTIONS */}
-      <div className="border-t border-brand-border pt-6 flex items-center justify-end mb-8">
-        <button
-          onClick={() => onPost()}
-          disabled={!value.trim()}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <span>Post to X</span>
-          <Send className="w-3.5 h-3.5" />
-        </button>
+      <div className="border-t border-brand-border pt-6 mb-8">
+        {/* X Authentication Section */}
+        <div className="mb-4">
+          {!xUser ? (
+            <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg border border-brand-border">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-brand-text mb-1">
+                  Post directly to X
+                </p>
+                <p className="text-xs text-brand-textSecondary">
+                  Login to post with images and skip the X intent dialog
+                </p>
+              </div>
+              <XLoginButton onLogin={onXLogin} isLoading={xAuthLoading} />
+            </div>
+          ) : (
+            <div className="mb-3">
+              <XAccountBadge user={xUser} onLogout={onXLogout} />
+            </div>
+          )}
+        </div>
+
+        {/* Post Buttons */}
+        <div className="flex items-center justify-between gap-3">
+          {xUser ? (
+            <>
+              <button
+                onClick={() => onPost()}
+                disabled={!value.trim()}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg border border-brand-border text-brand-text font-medium text-sm hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>Use X Intent</span>
+              </button>
+              <button
+                onClick={() => handleDirectPostClick(value, imagePreview)}
+                disabled={!value.trim()}
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>Post Directly</span>
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => onPost()}
+              disabled={!value.trim()}
+              className="w-full flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-brand-black text-white font-bold text-sm hover:bg-brand-blackHover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>Post to X</span>
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* X Post Modal */}
+      {xUser && (
+        <XPostModal 
+          isOpen={showXPostModal}
+          onClose={() => setShowXPostModal(false)}
+          onConfirm={handleConfirmDirectPost}
+          postText={postingContext.text}
+          image={postingContext.image}
+          xUser={xUser}
+          isPosting={isPostingToX}
+        />
+      )}
 
       {!selectedPersona && !rewrittenValue && (
         <div className="mt-4 p-3 bg-brand-surface rounded-lg border border-brand-border text-xs text-brand-textSecondary text-center">

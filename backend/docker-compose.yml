@@ -14,8 +14,6 @@ services:
       - PORT=3001
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
       - X_CLIENT_ID=${X_CLIENT_ID}
-      - X_CLIENT_SECRET=${X_CLIENT_SECRET}
-      - X_REDIRECT_URI=${X_REDIRECT_URI}
     env_file:
       - .env
     healthcheck:
