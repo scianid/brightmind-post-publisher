@@ -47,15 +47,22 @@ function App() {
     const state = params.get('state');
     if (code && state) {
       handleXCallback(code, state);
-    }
-
-    // Restore X user from session storage
-    const storedXUser = sessionStorage.getItem('x_user');
-    if (storedXUser) {
-      try {
-        setXUser(JSON.parse(storedXUser));
-      } catch (e) {
-        console.error('Failed to parse stored X user:', e);
+    } else {
+      // Restore X user from local storage (persistent across refreshes)
+      const storedXUser = localStorage.getItem('x_user');
+      const storedToken = localStorage.getItem('x_access_token');
+      if (storedXUser && storedToken) {
+        try {
+          setXUser(JSON.parse(storedXUser));
+          // Optionally validate the token
+          validateXToken(storedToken);
+        } catch (e) {
+          console.error('Failed to parse stored X user:', e);
+          // Clear invalid data
+          localStorage.removeItem('x_user');
+          localStorage.removeItem('x_access_token');
+          localStorage.removeItem('x_refresh_token');
+        }
       }
     }
     // Auto-validate if key exists
@@ -134,6 +141,65 @@ function App() {
       setApiKey('');
     } finally {
       setAuthLoading(false);
+    }
+  };
+
+  // Validate X token and handle refresh if needed
+  const validateXToken = async (accessToken) => {
+    try {
+      const userResponse = await fetch(`${BACKEND_URL}/api/x/user`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      
+      if (!userResponse.ok) {
+        // Token might be expired, try to refresh
+        const refreshToken = localStorage.getItem('x_refresh_token');
+        if (refreshToken) {
+          await refreshXToken(refreshToken);
+        } else {
+          throw new Error('Token invalid and no refresh token available');
+        }
+      }
+    } catch (error) {
+      console.error('Token validation failed:', error);
+      // Clear invalid tokens
+      localStorage.removeItem('x_user');
+      localStorage.removeItem('x_access_token');
+      localStorage.removeItem('x_refresh_token');
+      localStorage.removeItem('x_client_id');
+      setXUser(null);
+    }
+  };
+
+  // Refresh X token
+  const refreshXToken = async (refreshToken) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/x/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refreshToken }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Token refresh failed');
+      }
+      
+      const { accessToken, refreshToken: newRefreshToken } = await response.json();
+      
+      // Update stored tokens
+      localStorage.setItem('x_access_token', accessToken);
+      if (newRefreshToken) {
+        localStorage.setItem('x_refresh_token', newRefreshToken);
+      }
+      
+      console.log('Token refreshed successfully');
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      throw error;
     }
   };
 
@@ -233,7 +299,7 @@ function App() {
       const { clientId } = await response.json();
       
       // Store client ID for later use (logout)
-      sessionStorage.setItem('x_client_id', clientId);
+      localStorage.setItem('x_client_id', clientId);
       
       // Generate PKCE challenge on client
       const codeVerifier = generateCodeVerifier();
@@ -243,8 +309,8 @@ function App() {
       const state = generateRandomString(32);
       
       // Store verifier and state for callback
-      sessionStorage.setItem('x_code_verifier', codeVerifier);
-      sessionStorage.setItem('x_state', state);
+      localStorage.setItem('x_code_verifier', codeVerifier);
+      localStorage.setItem('x_state', state);
       
       // Build authorization URL with client as redirect URI
       const redirectUri = window.location.origin;
@@ -292,8 +358,8 @@ function App() {
   }
 
   const handleXCallback = async (code, state) => {
-    const storedState = sessionStorage.getItem('x_state');
-    const codeVerifier = sessionStorage.getItem('x_code_verifier');
+    const storedState = localStorage.getItem('x_state');
+    const codeVerifier = localStorage.getItem('x_code_verifier');
     
     // Validate state to prevent CSRF
     if (state !== storedState) {
@@ -345,16 +411,16 @@ function App() {
       
       const { user } = await userResponse.json();
       
-      // Store tokens and user info
-      sessionStorage.setItem('x_access_token', accessToken);
-      sessionStorage.setItem('x_refresh_token', refreshToken);
-      sessionStorage.setItem('x_user', JSON.stringify(user));
-      sessionStorage.setItem('x_client_id', clientId);
+      // Store tokens and user info in localStorage (persistent)
+      localStorage.setItem('x_access_token', accessToken);
+      localStorage.setItem('x_refresh_token', refreshToken);
+      localStorage.setItem('x_user', JSON.stringify(user));
+      localStorage.setItem('x_client_id', clientId);
       setXUser(user);
       
-      // Clean up and redirect
-      sessionStorage.removeItem('x_state');
-      sessionStorage.removeItem('x_code_verifier');
+      // Clean up temporary auth data and redirect
+      localStorage.removeItem('x_state');
+      localStorage.removeItem('x_code_verifier');
       window.history.replaceState({}, '', window.location.pathname);
       
     } catch (error) {
@@ -366,8 +432,8 @@ function App() {
   };
 
   const handleXLogout = async () => {
-    const accessToken = sessionStorage.getItem('x_access_token');
-    const clientId = sessionStorage.getItem('x_client_id');
+    const accessToken = localStorage.getItem('x_access_token');
+    const clientId = localStorage.getItem('x_client_id');
     
     try {
       // Revoke token directly with X API
@@ -387,17 +453,17 @@ function App() {
     } catch (error) {
       console.error('X logout failed:', error);
     } finally {
-      // Clear session storage regardless
-      sessionStorage.removeItem('x_access_token');
-      sessionStorage.removeItem('x_refresh_token');
-      sessionStorage.removeItem('x_user');
-      sessionStorage.removeItem('x_client_id');
+      // Clear local storage regardless
+      localStorage.removeItem('x_access_token');
+      localStorage.removeItem('x_refresh_token');
+      localStorage.removeItem('x_user');
+      localStorage.removeItem('x_client_id');
       setXUser(null);
     }
   };
 
   const handleDirectPost = async (textToPost, imageUrl) => {
-    const accessToken = sessionStorage.getItem('x_access_token');
+    const accessToken = localStorage.getItem('x_access_token');
     
     if (!accessToken) {
       alert('Please login to X first');
