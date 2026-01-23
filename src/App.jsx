@@ -501,7 +501,25 @@ function App() {
           error: errorData
         });
         
-        // Handle 403 Forbidden specifically
+        // Handle 403 Forbidden specifically for media uploads
+        if (response.status === 403 && imageUrl) {
+          const useWebIntent = window.confirm(
+            'Media upload is not available with your Twitter API access tier.\n\n' +
+            'Would you like to post using Twitter\'s web interface instead?\n' +
+            '(Note: You\'ll need to manually attach the image)'
+          );
+          
+          if (useWebIntent) {
+            // Fallback to web intent
+            const text = encodeURIComponent(finalContent);
+            const url = `https://x.com/intent/post?text=${text}`;
+            window.open(url, '_blank');
+          }
+          
+          return { success: false };
+        }
+        
+        // Handle 403 for text-only posts
         if (response.status === 403) {
           alert('Permission denied. Your X access token may not have write permissions. Please log out and log back in to X to refresh your token.');
           return { success: false };

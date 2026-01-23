@@ -159,8 +159,43 @@ router.post('/post/with-media', async (req, res) => {
         // Upload to X
         console.log('Uploading image to X...');
         try {
-          mediaId = await client.v1.uploadMedia(buffer, { mimeType });
-          console.log('Image uploaded, media ID:', mediaId);
+          // Retry logic for transient errors (503, 500)
+          let retries = 3;
+          let lastError;
+          
+          for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+              mediaId = await client.v1.uploadMedia(buffer, { mimeType });
+              console.log('Image uploaded, media ID:', mediaId);
+              break; // Success, exit retry loop
+            } catch (uploadError) {
+              lastError = uploadError;
+              
+              // Don't retry on permission errors
+              if (uploadError.code === 403) {
+                throw uploadError;
+              }
+              
+              // Retry on 503, 500, 502, 504
+              if (uploadError.code === 503 || uploadError.code === 500 || uploadError.code === 502 || uploadError.code === 504) {
+                console.log(`Upload attempt ${attempt}/${retries} failed with ${uploadError.code}, retrying...`);
+                
+                if (attempt < retries) {
+                  // Exponential backoff: 1s, 2s, 4s
+                  const delay = Math.pow(2, attempt - 1) * 1000;
+                  await new Promise(resolve => setTimeout(resolve, delay));
+                  continue;
+                }
+              }
+              
+              // Non-retryable error or final attempt
+              throw uploadError;
+            }
+          }
+          
+          if (!mediaId) {
+            throw lastError;
+          }
         } catch (uploadError) {
           console.error('X media upload failed:', uploadError);
           
@@ -168,6 +203,13 @@ router.post('/post/with-media', async (req, res) => {
             return res.status(403).json({ 
               error: 'Permission denied',
               message: 'Your access token does not have permission to upload media. Please log out and log back in to refresh your token with media upload permissions.' 
+            });
+          }
+          
+          if (uploadError.code === 503) {
+            return res.status(503).json({ 
+              error: 'Service unavailable',
+              message: 'Twitter media upload service is temporarily unavailable. Please try again in a few moments.' 
             });
           }
           
@@ -231,8 +273,37 @@ router.post('/post/with-media', async (req, res) => {
         
         // Upload to X
         console.log('Uploading image to X...');
-        mediaId = await client.v1.uploadMedia(buffer, { mimeType });
-        console.log('Image uploaded, media ID:', mediaId);
+        
+        // Retry logic for transient errors (503, 500)
+        let retries = 3;
+        let lastError;
+        
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            mediaId = await client.v1.uploadMedia(buffer, { mimeType });
+            console.log('Image uploaded, media ID:', mediaId);
+            break; // Success, exit retry loop
+          } catch (uploadError) {
+            lastError = uploadError;
+            
+            // Retry on 503, 500, 502, 504
+            if (uploadError.code === 503 || uploadError.code === 500 || uploadError.code === 502 || uploadError.code === 504) {
+              console.log(`Upload attempt ${attempt}/${retries} failed with ${uploadError.code}, retrying...`);
+              
+              if (attempt < retries) {
+                const delay = Math.pow(2, attempt - 1) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+              }
+            }
+            
+            throw uploadError;
+          }
+        }
+        
+        if (!mediaId) {
+          throw lastError;
+        }
         
       } catch (parseError) {
         console.error('Base64 parsing failed:', parseError);
