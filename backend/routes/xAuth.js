@@ -33,6 +33,75 @@ router.get('/auth/config', async (req, res) => {
 });
 
 /**
+ * POST /api/x/auth/token
+ * Exchange authorization code for access token (proxies to Twitter API to avoid CORS)
+ * Requires: code, codeVerifier, redirectUri
+ * Returns: accessToken, refreshToken, expiresIn
+ */
+router.post('/auth/token', async (req, res) => {
+  const { code, codeVerifier, redirectUri } = req.body;
+  
+  try {
+    // Validate request
+    if (!code || !codeVerifier || !redirectUri) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters',
+        message: 'code, codeVerifier, and redirectUri are required' 
+      });
+    }
+
+    // Validate environment configuration
+    if (!process.env.X_CLIENT_ID) {
+      return res.status(500).json({ 
+        error: 'Server configuration error',
+        message: 'X API credentials not configured' 
+      });
+    }
+    
+    console.log('Proxying token exchange to Twitter API...');
+    
+    // Exchange code for token by proxying to Twitter API
+    const tokenResponse = await fetch('https://api.twitter.com/2/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        code,
+        grant_type: 'authorization_code',
+        client_id: process.env.X_CLIENT_ID,
+        redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
+      }),
+    });
+    
+    if (!tokenResponse.ok) {
+      const errorData = await tokenResponse.json();
+      console.error('Twitter token exchange failed:', errorData);
+      throw new Error(errorData.error_description || 'Token exchange failed');
+    }
+    
+    const { access_token, refresh_token, expires_in } = await tokenResponse.json();
+    
+    console.log('Token exchange successful');
+    
+    res.json({
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      expiresIn: expires_in
+    });
+    
+  } catch (error) {
+    console.error('Token exchange failed:', error);
+    
+    res.status(500).json({ 
+      error: 'Authentication failed',
+      message: error.message 
+    });
+  }
+});
+
+/**
  * GET /api/x/user
  * Get authenticated user information from access token
  * Requires: Authorization header with access token

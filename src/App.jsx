@@ -311,33 +311,31 @@ function App() {
       }
       const { clientId } = await configResponse.json();
       
-      // Exchange code for token directly with X API
+      // Exchange code for token via backend (to avoid CORS)
       const redirectUri = window.location.origin;
-      const tokenResponse = await fetch('https://api.twitter.com/2/oauth2/token', {
+      const tokenResponse = await fetch(`${BACKEND_URL}/api/x/auth/token`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: new URLSearchParams({
+        body: JSON.stringify({
           code,
-          grant_type: 'authorization_code',
-          client_id: clientId,
-          redirect_uri: redirectUri,
-          code_verifier: codeVerifier,
+          codeVerifier,
+          redirectUri
         }),
       });
       
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json();
-        throw new Error(errorData.error_description || 'Token exchange failed');
+        throw new Error(errorData.message || 'Token exchange failed');
       }
       
-      const { access_token, refresh_token, expires_in } = await tokenResponse.json();
+      const { accessToken, refreshToken, expiresIn } = await tokenResponse.json();
       
       // Get user info from backend using the access token
       const userResponse = await fetch(`${BACKEND_URL}/api/x/user`, {
         headers: {
-          'Authorization': `Bearer ${access_token}`
+          'Authorization': `Bearer ${accessToken}`
         }
       });
       
@@ -348,8 +346,8 @@ function App() {
       const { user } = await userResponse.json();
       
       // Store tokens and user info
-      sessionStorage.setItem('x_access_token', access_token);
-      sessionStorage.setItem('x_refresh_token', refresh_token);
+      sessionStorage.setItem('x_access_token', accessToken);
+      sessionStorage.setItem('x_refresh_token', refreshToken);
       sessionStorage.setItem('x_user', JSON.stringify(user));
       sessionStorage.setItem('x_client_id', clientId);
       setXUser(user);
