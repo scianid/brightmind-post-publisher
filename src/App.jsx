@@ -472,6 +472,9 @@ function App() {
 
     const finalContent = typeof textToPost === 'string' ? textToPost : postText;
     
+    console.log('Posting to backend:', BACKEND_URL);
+    console.log('Endpoint:', imageUrl ? 'with-media' : 'text-only');
+    
     try {
       const endpoint = imageUrl 
         ? `${BACKEND_URL}/api/x/post/with-media`
@@ -491,8 +494,20 @@ function App() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to post');
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error('Post failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData
+        });
+        
+        // Handle 403 Forbidden specifically
+        if (response.status === 403) {
+          alert('Permission denied. Your X access token may not have write permissions. Please log out and log back in to X to refresh your token.');
+          return { success: false };
+        }
+        
+        throw new Error(errorData.message || `Failed to post (${response.status})`);
       }
       
       const result = await response.json();
@@ -511,6 +526,8 @@ function App() {
       if (error.message.includes('expired') || error.message.includes('Unauthorized')) {
         alert('Your X session has expired. Please log in again.');
         handleXLogout();
+      } else if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+        alert(`Cannot connect to backend server at ${BACKEND_URL}. Please check if the server is running.`);
       } else {
         alert(`Failed to post: ${error.message}`);
       }

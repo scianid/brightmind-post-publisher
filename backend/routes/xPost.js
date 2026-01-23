@@ -158,13 +158,34 @@ router.post('/post/with-media', async (req, res) => {
         
         // Upload to X
         console.log('Uploading image to X...');
-        mediaId = await client.v1.uploadMedia(buffer, { mimeType });
-        console.log('Image uploaded, media ID:', mediaId);
+        try {
+          mediaId = await client.v1.uploadMedia(buffer, { mimeType });
+          console.log('Image uploaded, media ID:', mediaId);
+        } catch (uploadError) {
+          console.error('X media upload failed:', uploadError);
+          
+          if (uploadError.code === 403) {
+            return res.status(403).json({ 
+              error: 'Permission denied',
+              message: 'Your access token does not have permission to upload media. Please log out and log back in to refresh your token with media upload permissions.' 
+            });
+          }
+          
+          throw uploadError;
+        }
         
       } catch (downloadError) {
-        console.error('Image download failed:', downloadError);
+        console.error('Image processing failed:', downloadError);
+        
+        if (downloadError.code === 403) {
+          return res.status(403).json({ 
+            error: 'Permission denied',
+            message: downloadError.message || 'Token lacks media upload permissions. Please log out and log back in.' 
+          });
+        }
+        
         return res.status(400).json({ 
-          error: 'Failed to download image',
+          error: 'Failed to process image',
           message: downloadError.message 
         });
       }
